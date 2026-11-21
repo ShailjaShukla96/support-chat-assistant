@@ -22,8 +22,15 @@ Build a customer service chat assistant that answers technical support questions
 ### Out of scope (v1)
 - Account changes or billing actions that modify data.
 - Voice support.
-- Authentication-based personalization beyond passing a session/user ID.
+- User authentication and accounts (moved to the follow-up scope below).
 - Multi-language support (English only).
+
+### Follow-up scope: user authentication and accounts (PRD 002)
+Authentication is in scope for the second PRD, [002-prd-user-auth.md](002-prd-user-auth.md), not for v1:
+- Customer sign-up, sign-in, sign-out, and password reset. Sign-in is optional; anonymous chat keeps working.
+- Persisted chat history for signed-in customers, and linking an in-progress anonymous session to the account at sign-in.
+- Individual agent accounts for escalation handling, replacing the shared agent token, with roles `CUSTOMER`, `AGENT`, and `ADMIN`.
+- Session management and rate limiting on authentication endpoints.
 
 ## 4. Functional Requirements
 
