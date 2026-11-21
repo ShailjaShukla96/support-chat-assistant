@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: support-chat
+  config:
+    # Spring Boot does not read .env by default. The repo-root .env (and a backend-local one) is loaded here.
+    import: optional:file:../.env[.properties],optional:file:.env[.properties]
+  ai:
+    google:
+      genai:
+        # No default on purpose: startup fails fast when the key is missing (Constitution II: key lives in .env only).
+        api-key: ${GOOGLE_AI_STUDIO_API_KEY}
+        chat:
+          model: gemma-4-26b-a4b-it
+          temperature: 0.3
+          max-output-tokens: 1024
+  datasource:
+    url: jdbc:h2:file:./data/support
+    username: sa
+    password: ""
+  sql:
+    init:
+      mode: always
+
+logging:
+  structured:
+    format:
+      console: ecs
+
+app:
+  prompt:
+    system-role-supported: true
+  knowledge:
+    path: classpath:support-content/
+    max-chars: 60000
+  chat:
+    max-message-chars: 2000
+    history-limit: 20
+    provider-timeout-seconds: 30
+  agent:
+    # Empty disables /api/agent/** (returns 404). Set AGENT_API_TOKEN in .env.
+    token: ${AGENT_API_TOKEN:}
+  cors:
+    allowed-origin: http://localhost:5173

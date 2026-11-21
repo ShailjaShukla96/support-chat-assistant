@@ -1,0 +1,11 @@
+# Live suite: real model and the real key (from the environment or ../.env), but a throwaway in-memory database.
+spring:
+  datasource:
+    url: jdbc:h2:mem:livetest;DB_CLOSE_DELAY=-1
+  sql:
+    init:
+      mode: always
+
+app:
+  agent:
+    token: live-agent-token

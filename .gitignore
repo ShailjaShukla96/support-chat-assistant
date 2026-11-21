@@ -1,0 +1,27 @@
+# Secrets (Constitution II): never commit real keys
+.env
+.env.*
+!.env.example
+
+# Backend
+backend/target/
+backend/data/
+*.class
+*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Editors / OS
+.idea/
+.vscode/
+*.iml
+*.swp
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Local MCP config holds a personal access token (never commit)
+.mcp.json

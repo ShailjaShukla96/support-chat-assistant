@@ -1,0 +1,428 @@
+openapi: 3.0.3
+info:
+  title: Caramel AI Tech Support Chat API
+  version: 1.0.0
+  description: >
+    HTTP contract between the React chat UI (and agents) and the Spring Boot service.
+    Domain outcomes (no answer, provider unavailable, blocked output) are returned as HTTP 200
+    with an `outcome` field so the UI always has a friendly message to show. Validation and lookup
+    failures use RFC 9457 problem responses. No endpoint ever returns API keys, the system prompt,
+    or raw provider errors.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Chat
+  - name: Agent
+
+paths:
+  /api/sessions:
+    post:
+      tags: [Chat]
+      summary: Start a chat session
+      operationId: createSession
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /api/sessions/{sessionId}/messages:
+    post:
+      tags: [Chat]
+      summary: Send a customer message and receive the assistant reply
+      description: >
+        Stores the customer message, builds the prompt from the session history (last 20 messages)
+        and the support content, calls the model, and stores and returns the reply. If the text
+        contains a request for a human agent, no model call is made; an escalation is recorded and a
+        confirmation with outcome `ESCALATED` is returned.
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: Assistant reply (including handled failure outcomes)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantReply'
+              examples:
+                answered:
+                  value:
+                    messageId: 3f9c1a52-7d0e-4c1e-9a77-5a1b2c3d4e5f
+                    text: A 429 means you reached the rate limit for your plan. Wait for the Retry-After period, then retry.
+                    outcome: ANSWERED
+                    escalationOffered: false
+                noAnswer:
+                  value:
+                    messageId: 8b2d6e10-1c3f-4f55-8e0a-0d9a7b6c5d4e
+                    text: I do not have information about that. I can pass this to a human agent if you like.
+                    outcome: NO_ANSWER
+                    escalationOffered: true
+                unavailable:
+                  value:
+                    messageId: 5e4d3c2b-1a09-4876-9f65-4e3d2c1b0a99
+                    text: I cannot answer right now. You can try again in a moment or ask for a human agent.
+                    outcome: UNAVAILABLE
+                    escalationOffered: true
+        '400':
+          description: Empty text or text longer than 2,000 characters
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Unknown session
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/sessions/{sessionId}/escalations:
+    post:
+      tags: [Chat]
+      summary: Ask for a human agent
+      description: >
+        Records an escalation request with an immutable snapshot of the session transcript. May be
+        called at any time and more than once per session.
+      operationId: requestEscalation
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalationRequestBody'
+      responses:
+        '201':
+          description: Escalation recorded
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationReceipt'
+        '404':
+          description: Unknown session
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/messages/{messageId}/rating:
+    put:
+      tags: [Chat]
+      summary: Rate an assistant message helpful or not helpful
+      description: Upsert. The most recent rating for the message is the one kept.
+      operationId: rateMessage
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RatingRequest'
+      responses:
+        '200':
+          description: Rating stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rating'
+        '400':
+          description: Invalid value, or the message is not an assistant message
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Unknown message
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/agent/escalations:
+    get:
+      tags: [Agent]
+      summary: List escalation requests, newest first
+      description: >
+        Requires the `X-Agent-Token` header. Returns 404 when the server has no agent token configured
+        (endpoint disabled). The list omits transcripts.
+      operationId: listEscalations
+      security:
+        - agentToken: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Escalation summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EscalationSummary'
+        '401':
+          description: Missing or wrong token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/agent/escalations/{escalationId}:
+    get:
+      tags: [Agent]
+      summary: Get one escalation with its full transcript
+      operationId: getEscalation
+      security:
+        - agentToken: []
+      parameters:
+        - name: escalationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Escalation with transcript
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationDetail'
+        '401':
+          description: Missing or wrong token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Unknown escalation, or endpoint disabled
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+components:
+  securitySchemes:
+    agentToken:
+      type: apiKey
+      in: header
+      name: X-Agent-Token
+
+  headers:
+    XRequestId:
+      description: Request ID for correlating with server logs
+      schema:
+        type: string
+
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreateSessionRequest:
+      type: object
+      properties:
+        userRef:
+          type: string
+          maxLength: 128
+          description: Optional ID from the host site. Stored only; never used to personalize answers.
+
+    Session:
+      type: object
+      required: [sessionId, createdAt]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    SendMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Trimmed before validation. Whitespace-only is rejected.
+
+    AssistantReply:
+      type: object
+      required: [messageId, text, outcome, escalationOffered]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        text:
+          type: string
+        outcome:
+          type: string
+          enum: [ANSWERED, NO_ANSWER, UNAVAILABLE, BLOCKED, ESCALATED]
+        escalationOffered:
+          type: boolean
+          description: When true the UI shows an action to request a human agent.
+        escalationId:
+          type: string
+          format: uuid
+          description: Present only when outcome is ESCALATED.
+
+    EscalationRequestBody:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum: [CUSTOMER_REQUESTED, ASSISTANT_UNSURE, PROVIDER_UNAVAILABLE]
+          default: CUSTOMER_REQUESTED
+
+    EscalationReceipt:
+      type: object
+      required: [escalationId, receivedAt, message]
+      properties:
+        escalationId:
+          type: string
+          format: uuid
+        receivedAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+          description: Confirmation text to show the customer.
+
+    RatingRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          enum: [UP, DOWN]
+
+    Rating:
+      type: object
+      required: [messageId, value, updatedAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        value:
+          type: string
+          enum: [UP, DOWN]
+        updatedAt:
+          type: string
+          format: date-time
+
+    EscalationSummary:
+      type: object
+      required: [escalationId, sessionId, reason, status, createdAt]
+      properties:
+        escalationId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          enum: [CUSTOMER_REQUESTED, ASSISTANT_UNSURE, PROVIDER_UNAVAILABLE]
+        status:
+          type: string
+          enum: [NEW, ACKNOWLEDGED]
+        createdAt:
+          type: string
+          format: date-time
+
+    EscalationDetail:
+      type: object
+      description: Same fields as EscalationSummary plus the transcript (flattened, no allOf, for strict validators).
+      required: [escalationId, sessionId, reason, status, createdAt, transcript]
+      properties:
+        escalationId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          enum: [CUSTOMER_REQUESTED, ASSISTANT_UNSURE, PROVIDER_UNAVAILABLE]
+        status:
+          type: string
+          enum: [NEW, ACKNOWLEDGED]
+        createdAt:
+          type: string
+          format: date-time
+        transcript:
+          type: array
+          items:
+            $ref: '#/components/schemas/TranscriptEntry'
+
+    TranscriptEntry:
+      type: object
+      required: [role, text, createdAt]
+      properties:
+        role:
+          type: string
+          enum: [USER, ASSISTANT]
+        text:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details. Never contains stack traces or provider error bodies.
+      required: [title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string

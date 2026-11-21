@@ -1,0 +1,14 @@
+spring:
+  ai:
+    google:
+      genai:
+        api-key: test-key-not-real
+  datasource:
+    url: jdbc:h2:mem:supporttest;DB_CLOSE_DELAY=-1
+  sql:
+    init:
+      mode: always
+
+app:
+  agent:
+    token: test-agent-token
